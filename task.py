@@ -3,6 +3,7 @@ import numpy as np
 from PIL import Image
 import time
 import os
+import torch
 
 
 class DataLoader():
@@ -71,30 +72,29 @@ class DataLoader():
         img1 = Image.fromarray(np.uint8(source1))
         img2 = Image.fromarray(np.uint8(source2))
         img3 = Image.fromarray(np.uint8(source3))
-        return np.array(img1), np.array(img2), np.array(img3)
+        return torch.as_tensor(np.array(img1)), {'1': np.array(img2)}, np.array(img3)
 
     def set_graph(self):
-        self.output_cache = {"4": {}, "5": {}, "6": {}, "7": {}}
+        self.output_cache = {}
         ret = self.start.options(num_return_vals=1).remote()
-        for i in range(len(self.preprocess_section["4"]["output_list"])):
-            self.output_cache["4"][self.preprocess_section["4"]["output_list"][i]] = ret[i]
-        ret = self.resize.options(num_return_vals=1).remote(*[self.output_cache["4"]["image"]])
-        for i in range(len(self.preprocess_section["5"]["output_list"])):
-            self.output_cache["5"][self.preprocess_section["5"]["output_list"][i]] = ret[i]
-        ret = self.transpose.options(num_return_vals=1).remote(*[self.output_cache["4"]["image"]])
-        for i in range(len(self.preprocess_section["6"]["output_list"])):
-            self.output_cache["6"][self.preprocess_section["6"]["output_list"][i]] = ret[i]
-        ret = self.stop.options(num_return_vals=1).remote(*[self.output_cache["5"]["image"], self.output_cache["6"]["image"], self.output_cache["4"]["image"]])
-        for i in range(len(self.preprocess_section["7"]["output_list"])):
-            self.output_cache["7"][self.preprocess_section["7"]["output_list"][i]] = ret[i]
+        self.output_cache["{}_{}".format(4, self.preprocess_section["4"]["output_list"][0])] = ret
+        ret = self.resize.options(num_return_vals=1).remote(*[self.output_cache["{}_{}".format(4, "image")]])
+        self.output_cache["{}_{}".format(5, self.preprocess_section["5"]["output_list"][0])] = ret
+        ret = self.transpose.options(num_return_vals=1).remote(*[self.output_cache["{}_{}".format(5, "image")]])
+        self.output_cache["{}_{}".format(6, self.preprocess_section["6"]["output_list"][0])] = ret
+        ret = self.stop.options(num_return_vals=1).remote(*[self.output_cache["{}_{}".format(5, "image")],
+                                                            self.output_cache["{}_{}".format(6, "image")],
+                                                            self.output_cache["{}_{}".format(4, "image")]])
+        self.output_cache["stop"] = ret
 
     def run(self):
-        ray.get(self.output_cache['7']["image"])
+        self.set_graph()
+        return ray.get(self.output_cache["stop"])
 
 
 
 if __name__ == '__main__':
     ray.init(num_cpus=4)
     data_loader = DataLoader()
-    data_loader.set_graph()
-    data_loader.run()
+    ret = data_loader.run()
+    ray.shutdown()
